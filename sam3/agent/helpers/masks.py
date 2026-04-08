@@ -12,7 +12,7 @@ import torch
 from torch import device
 
 from .boxes import Boxes
-from .memory import retry_if_cuda_oom
+from .memory import retry_if_oom
 from .roi_align import ROIAlign
 
 
@@ -554,7 +554,7 @@ class ROIMasks:
             else:
                 paste_func = paste_masks_in_image
         else:
-            paste_func = retry_if_cuda_oom(paste_masks_in_image)
+            paste_func = retry_if_oom(paste_masks_in_image)
         bitmasks = paste_func(
             self.tensor, boxes.tensor, (height, width), threshold=threshold
         )

@@ -1400,14 +1400,10 @@ class VideoTrackingMultiplex(nn.Module):
                 feats = prev.get("maskmem_features")
                 if feats is None:
                     continue
-                # "maskmem_features" might have been offloaded to CPU in demo use cases,
-                # so we load it back to GPU (it's a no-op if it's already on GPU).
-                feats = feats.cuda(non_blocking=True)
+                feats = feats.to(device, non_blocking=False)
                 if feats.dim() == 5:
                     feats = multiplex_state.demux(feats).contiguous()
-                    prev["maskmem_features"] = (
-                        feats.cpu() if not feats.is_cuda else feats
-                    )
+                    prev["maskmem_features"] = feats
 
                 if feats.shape[0] == 0:
                     continue
@@ -1421,12 +1417,10 @@ class VideoTrackingMultiplex(nn.Module):
                 maskmem_enc = maskmem_pos_list[-1]
                 if maskmem_enc is None:
                     continue
-                maskmem_enc = maskmem_enc.cuda(non_blocking=True)
+                maskmem_enc = maskmem_enc.to(device, non_blocking=False)
                 if maskmem_enc.dim() == 5:
                     maskmem_enc = multiplex_state.demux(maskmem_enc).contiguous()
-                    prev["maskmem_pos_enc"][-1] = (
-                        maskmem_enc.cpu() if not maskmem_enc.is_cuda else maskmem_enc
-                    )
+                    prev["maskmem_pos_enc"][-1] = maskmem_enc
                 maskmem_enc = maskmem_enc.flatten(2).permute(2, 0, 1)
 
                 if self.use_maskmem_tpos_v2:
@@ -1446,8 +1440,8 @@ class VideoTrackingMultiplex(nn.Module):
 
                 if self.save_image_features:
                     # image features are in (HW)BC
-                    image_feat = prev["image_features"].cuda()
-                    image_pos_embed = prev["image_pos_enc"].cuda() + tpos_enc
+                    image_feat = prev["image_features"].to(device)
+                    image_pos_embed = prev["image_pos_enc"].to(device) + tpos_enc
                     to_cat_image_feat.append(image_feat)
                     to_cat_image_pos_embed.append(image_pos_embed)
 

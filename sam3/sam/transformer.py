@@ -237,14 +237,6 @@ class Attention(nn.Module):
         v = self._separate_heads(v, self.num_heads)
 
         dropout_p = self.dropout_p if self.training else 0.0
-        # Attention
-        # with torch.backends.cuda.sdp_kernel(
-        #     enable_flash=USE_FLASH_ATTN,
-        #     # if Flash attention kernel is off, then math kernel needs to be enabled
-        #     enable_math=(OLD_GPU and dropout_p > 0.0) or MATH_KERNEL_ON,
-        #     enable_mem_efficient=OLD_GPU,
-        # ):
-        # Let's trust the dispatcher....
         if self.use_fa3:
             from sam3.perflib.fa3 import flash_attn_func
 
@@ -253,9 +245,6 @@ class Attention(nn.Module):
                 q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
             ).transpose(1, 2)
         else:
-            torch.backends.cuda.enable_flash_sdp(True)
-            torch.backends.cuda.enable_math_sdp(True)
-            torch.backends.cuda.enable_mem_efficient_sdp(True)
             out = F.scaled_dot_product_attention(q, k, v, dropout_p=dropout_p)
 
         out = self._recombine_heads(out)
@@ -283,7 +272,7 @@ class RoPEAttention(Attention):
         self.compute_cis = partial(
             compute_axial_cis, dim=self.internal_dim // self.num_heads, theta=rope_theta
         )
-        device = torch.device("cuda") if torch.cuda.is_available() else None
+        device = torch.device("cpu")
         self.freqs_cis = self.compute_cis(
             end_x=feat_sizes[0], end_y=feat_sizes[1], device=device
         )
@@ -332,14 +321,6 @@ class RoPEAttention(Attention):
             )
 
         dropout_p = self.dropout_p if self.training else 0.0
-        # Attention
-        # with torch.backends.cuda.sdp_kernel(
-        #     enable_flash=USE_FLASH_ATTN,
-        #     # if Flash attention kernel is off, then math kernel needs to be enabled
-        #     enable_math=(OLD_GPU and dropout_p > 0.0) or MATH_KERNEL_ON,
-        #     enable_mem_efficient=OLD_GPU,
-        # ):
-        # Let's trust the dispatcher....
         if self.use_fa3:
             from sam3.perflib.fa3 import flash_attn_func
 
@@ -348,9 +329,6 @@ class RoPEAttention(Attention):
                 q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
             ).transpose(1, 2)
         else:
-            torch.backends.cuda.enable_flash_sdp(True)
-            torch.backends.cuda.enable_math_sdp(True)
-            torch.backends.cuda.enable_mem_efficient_sdp(True)
             out = F.scaled_dot_product_attention(q, k, v, dropout_p=dropout_p)
 
         out = self._recombine_heads(out)

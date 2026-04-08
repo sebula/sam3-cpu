@@ -62,8 +62,6 @@ def load_resource_as_video_frames(
             img /= img_std
             images.append(img)
         images = torch.stack(images)
-        if not offload_video_to_cpu:
-            images = images.cuda()
         return images, orig_height, orig_width
 
     is_image = (
@@ -103,10 +101,6 @@ def load_image_as_single_frame_video(
 
     img_mean = torch.tensor(img_mean, dtype=torch.float16)[:, None, None]
     img_std = torch.tensor(img_std, dtype=torch.float16)[:, None, None]
-    if not offload_video_to_cpu:
-        images = images.cuda()
-        img_mean = img_mean.cuda()
-        img_std = img_std.cuda()
     # normalize by mean and std
     images -= img_mean
     images /= img_std
@@ -124,7 +118,7 @@ def load_video_frames(
 ):
     """
     Load the video frames from video_path. The frames are resized to image_size as in
-    the model and are loaded to GPU if offload_video_to_cpu=False. This is used by the demo.
+    the model. This CPU-only fork always keeps tensors on CPU (offload_video_to_cpu is ignored for device placement).
     """
     assert isinstance(video_path, str)
     if video_path.startswith("<load-dummy-video"):
@@ -207,10 +201,6 @@ def load_video_frames_from_image_folder(
         tqdm(img_paths, desc=f"frame loading (image folder) [rank={RANK}]")
     ):
         images[n], video_height, video_width = _load_img_as_tensor(img_path, image_size)
-    if not offload_video_to_cpu:
-        images = images.cuda()
-        img_mean = img_mean.cuda()
-        img_std = img_std.cuda()
     # normalize by mean and std
     images -= img_mean
     images /= img_std
@@ -319,10 +309,6 @@ def load_video_frames_from_video_file_using_cv2(
 
     img_mean = torch.tensor(img_mean, dtype=torch.float16).view(1, 3, 1, 1)
     img_std = torch.tensor(img_std, dtype=torch.float16).view(1, 3, 1, 1)
-    if not offload_video_to_cpu:
-        video_tensor = video_tensor.cuda()
-        img_mean = img_mean.cuda()
-        img_std = img_std.cuda()
     # normalize by mean and std
     video_tensor -= img_mean
     video_tensor /= img_std
@@ -338,8 +324,6 @@ def load_dummy_video(image_size, offload_video_to_cpu, num_frames=60, do_zeros=F
         images = torch.randn(num_frames, 3, image_size, image_size, dtype=torch.float16)
     else:
         images = torch.zeros(num_frames, 3, image_size, image_size, dtype=torch.float16)
-    if not offload_video_to_cpu:
-        images = images.cuda()
     return images, video_height, video_width
 
 
@@ -407,8 +391,6 @@ class AsyncImageFrameLoader:
         # normalize by mean and std
         img -= self.img_mean
         img /= self.img_std
-        if not self.offload_video_to_cpu:
-            img = img.cuda()
         self.images[index] = img
         return img
 
@@ -418,8 +400,7 @@ class AsyncImageFrameLoader:
 
 class TorchCodecDecoder:
     """
-    A wrapper to support GPU device and num_threads in TorchCodec decoder,
-    which are not supported by `torchcodec.decoders.SimpleVideoDecoder` yet.
+    A thin wrapper around torchcodec's low-level decoder with configurable device and num_threads.
     """
 
     def __init__(self, source, dimension_order="NCHW", device="cpu", num_threads=1):
@@ -440,7 +421,7 @@ class TorchCodecDecoder:
             self._decoder,
             dimension_order=dimension_order,
             device=device_string,
-            num_threads=(1 if "cuda" in device_string else num_threads),
+            num_threads=num_threads,
         )
         video_metadata = core.get_container_metadata(self._decoder)
         best_stream_index = video_metadata.best_video_stream_index
@@ -518,37 +499,20 @@ class AsyncVideoFileLoaderWithTorchCodec:
         gpu_device=None,
         use_rand_seek_in_loading=False,
     ):
-        # Check and possibly infer the output device (and also get its GPU id when applicable)
-        assert gpu_device is None or gpu_device.type == "cuda"
-        gpu_id = (
-            gpu_device.index
-            if gpu_device is not None and gpu_device.index is not None
-            else torch.cuda.current_device()
-        )
-        if offload_video_to_cpu:
-            out_device = torch.device("cpu")
-        else:
-            out_device = torch.device("cuda") if gpu_device is None else gpu_device
+        # CPU-only fork: gpu_acceleration and gpu_device are accepted for API parity but ignored.
+        out_device = torch.device("cpu")
         self.out_device = out_device
-        self.gpu_acceleration = gpu_acceleration
-        self.gpu_id = gpu_id
+        self.gpu_acceleration = False
+        self.gpu_id = 0
         self.image_size = image_size
         self.offload_video_to_cpu = offload_video_to_cpu
         if not isinstance(img_mean, torch.Tensor):
             img_mean = torch.tensor(img_mean, dtype=torch.float16)[:, None, None]
-        self.img_mean = img_mean
+        self.img_mean = img_mean.cpu()
         if not isinstance(img_std, torch.Tensor):
             img_std = torch.tensor(img_std, dtype=torch.float16)[:, None, None]
-        self.img_std = img_std
-
-        if gpu_acceleration:
-            self.img_mean = self.img_mean.to(f"cuda:{self.gpu_id}")
-            self.img_std = self.img_std.to(f"cuda:{self.gpu_id}")
-            decoder_option = {"device": f"cuda:{self.gpu_id}"}
-        else:
-            self.img_mean = self.img_mean.cpu()
-            self.img_std = self.img_std.cpu()
-            decoder_option = {"num_threads": 1}  # use a single thread to save memory
+        self.img_std = img_std.cpu()
+        decoder_option = {"device": "cpu", "num_threads": 1}
 
         self.rank = int(os.environ.get("RANK", "0"))
         self.world_size = int(os.environ.get("WORLD_SIZE", "1"))
@@ -586,7 +550,7 @@ class AsyncVideoFileLoaderWithTorchCodec:
 
     @torch.inference_mode()
     def _start_video_loading(self):
-        desc = f"frame loading (TorchCodec w/ {'GPU' if self.gpu_acceleration else 'CPU'}) [rank={RANK}]"
+        desc = f"frame loading (TorchCodec, CPU) [rank={RANK}]"
         pbar = tqdm(desc=desc, total=self.num_frames)
         self.num_loaded_frames = 0
         # load the first frame synchronously to cache it before the session is opened

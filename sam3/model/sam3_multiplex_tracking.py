@@ -39,6 +39,7 @@ from sam3.model.data_misc import (
     NestedTensor,
 )
 from sam3.model.geometry_encoders import Prompt
+from sam3.model.device_utils import inference_bf16_autocast, non_blocking_to
 from sam3.model.io_utils import load_resource_as_video_frames
 
 
@@ -154,7 +155,9 @@ class Sam3MultiplexTracking(Sam3MultiplexBase):
             find_metadatas=[None] * num_frames,
         )
         with torch.profiler.record_function("Sam3MultiplexTracking.recursive_to"):
-            input_batch = recursive_to(input_batch, device, non_blocking=True)
+            input_batch = recursive_to(
+                input_batch, device, non_blocking=non_blocking_to(device)
+            )
         inference_state["input_batch"] = input_batch
 
         # construct the placeholder interactive prompts and tracking queries
@@ -228,11 +231,12 @@ class Sam3MultiplexTracking(Sam3MultiplexBase):
             img_std=self.image_std,
             async_loading_frames=async_loading_frames,
             video_loader_type=video_loader_type,
+            compute_device=self.device,
         )
         inference_state = {}
         inference_state["image_size"] = self.image_size
         inference_state["num_frames"] = len(images)
-        inference_state["device"] = torch.device("cuda")
+        inference_state["device"] = self.device
         inference_state["orig_height"] = orig_height
         inference_state["orig_width"] = orig_width
         inference_state["constants"] = {}
@@ -715,8 +719,13 @@ class Sam3MultiplexTracking(Sam3MultiplexBase):
 
             # slice those valid entries from the original outputs
             keep_idx = torch.nonzero(keep, as_tuple=True)[0]
-            keep_idx_gpu = keep_idx.pin_memory().to(
-                device=out_binary_masks.device, non_blocking=True
+            nb = non_blocking_to(out_binary_masks.device)
+            keep_idx_gpu = (
+                keep_idx.pin_memory().to(
+                    device=out_binary_masks.device, non_blocking=True
+                )
+                if nb
+                else keep_idx.to(device=out_binary_masks.device)
             )
 
             out_obj_ids = torch.index_select(out_obj_ids, 0, keep_idx)
@@ -1330,7 +1339,7 @@ class Sam3MultiplexTracking(Sam3MultiplexBase):
         self.tracker.transformer.encoder.forward = shape_logging_wrapper(
             compile_wrapper(
                 self.tracker.transformer.encoder.forward,
-                mode="max-autotune-no-cudagraphs",
+                mode="default",
                 fullgraph=True,
                 dynamic=True,
             ),
@@ -1346,14 +1355,14 @@ class Sam3MultiplexTracking(Sam3MultiplexBase):
 
         sam3.model.sam3_video_base._associate_det_trk_compilable = compile_wrapper(
             sam3.model.sam3_video_base._associate_det_trk_compilable,
-            mode="max-autotune-no-cudagraphs",
+            mode="default",
             fullgraph=True,
             dynamic=False,
         )
 
         self.tracker._suppress_object_pw_area_shrinkage = compile_wrapper(
             self.tracker._suppress_object_pw_area_shrinkage,
-            mode="max-autotune-no-cudagraphs",
+            mode="default",
             fullgraph=True,
             dynamic=False,
         )
@@ -1613,7 +1622,6 @@ class Sam3MultiplexTracking(Sam3MultiplexBase):
         return inference_state
 
     @torch.inference_mode()
-    @torch.autocast(device_type="cuda", dtype=torch.bfloat16)
     def warm_up_compilation(self):
         """
         Warm up the model by running a dummy inference to compile the model. This is
@@ -1622,11 +1630,11 @@ class Sam3MultiplexTracking(Sam3MultiplexBase):
         if not self.compile_model:
             return
         self._warm_up_complete = False
-        if self.device.type != "cuda":
-            raise RuntimeError(
-                f"The model must be on CUDA for warm-up compilation, got {self.device=}."
-            )
+        # CPU-only fork: skip torch.compile warm-up (compile_model should be False).
+        self._warm_up_complete = True
+        return
 
+    def _warm_up_compilation_impl(self):
         # temporally set to single GPU temporarily for warm-up compilation
         orig_rank = self.rank
         orig_world_size = self.world_size
@@ -1752,9 +1760,12 @@ class Sam3MultiplexTracking(Sam3MultiplexBase):
         backbone_out.update(text_outputs)
         return backbone_out
 
-    @torch.autocast(device_type="cuda", dtype=torch.bfloat16)
     def forward(self, input: BatchedDatapoint, is_inference: bool = False):
         """This method is only used for benchmark eval (not used in the demo)."""
+        with inference_bf16_autocast(self.device):
+            return self._forward_eval(input, is_inference)
+
+    def _forward_eval(self, input: BatchedDatapoint, is_inference: bool = False):
         # set the model to single GPU for benchmark evaluation (to be compatible with trainer)
         orig_rank = self.rank
         orig_world_size = self.world_size
@@ -3381,7 +3392,7 @@ class Sam3MultiplexTrackingWithInteractivity(Sam3MultiplexTracking):
         # Create singleton multiplex state and remux extracted tensors
         new_multiplex_state = self.tracker.multiplex_controller.get_state(
             num_valid_entries=1,
-            device=source_state.get("device", "cuda"),
+            device=source_state.get("device", self.device),
             dtype=torch.float32,
             random=False,
             object_ids=[obj_id],

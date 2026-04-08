@@ -94,23 +94,12 @@ def activation_ckpt_wrapper(module: Union[nn.Module, Callable]) -> Callable:
 
 def clone_output_wrapper(f: Callable[..., T]) -> Callable[..., T]:
     """
-    Clone the CUDA output tensors of a function to avoid in-place operations.
-
-    This wrapper is useful when working with torch.compile to prevent errors
-    related to in-place operations on tensors.
-
-    Args:
-        f: The function whose CUDA tensor outputs should be cloned
-
-    Returns:
-        A wrapped function that clones any CUDA tensor outputs
+    Clone tensor outputs of a function to avoid in-place issues with torch.compile.
     """
 
     @wraps(f)
     def wrapped(*args, **kwargs):
         outputs = f(*args, **kwargs)
-        return tree_map_only(
-            torch.Tensor, lambda t: t.clone() if t.is_cuda else t, outputs
-        )
+        return tree_map_only(torch.Tensor, lambda t: t.clone(), outputs)
 
     return wrapped

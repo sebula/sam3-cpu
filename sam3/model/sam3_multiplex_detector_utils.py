@@ -1,20 +1,9 @@
-import logging
-
 import numpy as np
 import torch
 from sam3 import perflib
 
-try:
-    # Ronghang's generic GPU NMS implementation; install via
-    # pip uninstall -y torch_generic_nms; TORCH_CUDA_ARCH_LIST="8.0 9.0" pip install git+https://github.com/ronghanghu/torch_generic_nms
-    from torch_generic_nms import generic_nms
-
-    GENERIC_NMS_AVAILABLE = True
-except ImportError:
-    GENERIC_NMS_AVAILABLE = False
-
 from sam3.perflib.masks_ops import mask_iou
-from sam3.train.masks_ops import mask_iom
+from sam3.model.masks_ops import mask_iom
 
 
 def nms_masks(
@@ -274,15 +263,7 @@ def _nms_masks_core_single(
         overlaps = mask_iom(masks_binary, masks_binary)  # (num_valid, num_valid)
     else:
         overlaps = mask_iou(masks_binary, masks_binary)  # (num_valid, num_valid)
-    # kept_inds are the indices among `probs` of those kept detections after NMS
-    if GENERIC_NMS_AVAILABLE:
-        kept_inds = generic_nms(overlaps, probs, iou_threshold, use_iou_matrix=True)
-    else:
-        logging.warning(
-            "Falling back to CPU mask NMS implementation -- please install `torch_generic_nms` via\n\t"
-            'pip uninstall -y torch_generic_nms; TORCH_CUDA_ARCH_LIST="8.0 9.0" pip install git+https://github.com/ronghanghu/torch_generic_nms'
-        )
-        kept_inds = generic_nms_cpu(overlaps, probs, iou_threshold)
+    kept_inds = generic_nms_cpu(overlaps, probs, iou_threshold)
 
     # valid_inds are the indices among `probs` of valid detections before NMS (or -1 for invalid)
     valid_inds = torch.where(is_valid, is_valid.cumsum(dim=0) - 1, -1)  # (num_det,)

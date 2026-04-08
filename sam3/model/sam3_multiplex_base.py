@@ -12,6 +12,7 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from sam3.logger import get_logger
+from sam3.model.device_utils import enter_persistent_bf16_autocast
 from sam3.model.box_ops import fast_diag_box_iou
 from sam3.model.data_misc import BatchedDatapoint, NestedTensor
 from sam3.model.sam3_multiplex_detector import Sam3MultiplexDetector
@@ -25,18 +26,13 @@ from sam3.model.sam3_video_base import (
     Sam3VideoBase,
 )
 from sam3.perflib.masks_ops import mask_iou
-from sam3.train.masks_ops import rle_encode
+from sam3.model.masks_ops import rle_encode
 from torch import nn, Tensor
 
 # a short 3-min timeout to quickly detect any synchronization failures
 SAM3_COLLECTIVE_OP_TIMEOUT_SEC = int(os.getenv("SAM3_COLLECTIVE_OP_TIMEOUT_SEC", "180"))
 
 logger = get_logger(__name__)
-
-if torch.cuda.get_device_properties(0).major >= 8:
-    # turn on tfloat32 for Ampere GPUs (https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices)
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
 
 
 class Sam3MultiplexTrackerPredictor(nn.Module):
@@ -167,9 +163,7 @@ class Sam3MultiplexTrackerPredictor(nn.Module):
         self.model = model
         self.per_obj_inference = per_obj_inference
         self.fill_hole_area = fill_hole_area
-        # use bfloat16 inference for Flash Attention kernel
-        self.bf16_context = torch.autocast(device_type="cuda", dtype=torch.bfloat16)
-        self.bf16_context.__enter__()  # keep using for the entire model process
+        self.bf16_context = enter_persistent_bf16_autocast(torch.device("cpu"))
 
     def __getattr__(self, name):
         # Expose all attributes of the underlying model
@@ -402,7 +396,6 @@ class Sam3MultiplexBase(Sam3VideoBase):
         self._profiler = torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
-                torch.profiler.ProfilerActivity.CUDA,
             ],
             record_shapes=True,
             experimental_config=torch.profiler._ExperimentalConfig(
@@ -1728,7 +1721,7 @@ class Sam3MultiplexBase(Sam3VideoBase):
             )
             assert isinstance(out_obj_ids, list)
             # Optionally filter to a subset of object ids (for partial propagation).
-            # We also clamp indices to available rows to avoid CUDA index_select assertions.
+            # We also clamp indices to available rows to avoid index_select shape errors.
             if filter_obj_ids is not None:
                 if len(out_obj_ids) > 0:
                     max_mask_rows = out_low_res_masks.shape[0]
@@ -2853,6 +2846,4 @@ class Sam3MultiplexPredictorWrapper(Sam3MultiplexTrackerPredictor):
         self.is_multiplex = is_multiplex
         self.is_multiplex_dynamic = is_multiplex_dynamic
 
-        # use bfloat16 inference for Flash Attention kernel
-        self.bf16_context = torch.autocast(device_type="cuda", dtype=torch.bfloat16)
-        self.bf16_context.__enter__()
+        self.bf16_context = enter_persistent_bf16_autocast(torch.device("cpu"))

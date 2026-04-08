@@ -187,7 +187,6 @@ def collect_propagation(model, session_id):
                 m = m[0]
             masks[int(oid)] = m
         mask_dict[frame_idx] = masks
-    torch.cuda.synchronize()
     return mask_dict
 
 
@@ -219,8 +218,6 @@ def main():
     username = getpass.getuser()
     os.environ["TORCHINDUCTOR_CACHE_DIR"] = f"/tmp/torchinductor_cache_{username}"
     os.environ["USE_PERFLIB"] = "1"
-    torch.autocast(device_type="cuda", dtype=torch.bfloat16).__enter__()
-
     # Prepare video frames
     frame_dir = "/tmp/sam3_qualitative_frames"
     if args.video:

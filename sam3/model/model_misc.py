@@ -38,33 +38,8 @@ def inverse_sigmoid(x, eps=1e-3):
 
 
 def get_sdpa_settings():
-    if torch.cuda.is_available():
-        old_gpu = torch.cuda.get_device_properties(0).major < 7
-        # only use Flash Attention on Ampere (8.0) or newer GPUs
-        use_flash_attn = torch.cuda.get_device_properties(0).major >= 8
-        if not use_flash_attn:
-            warnings.warn(
-                "Flash Attention is disabled as it requires a GPU with Ampere (8.0) CUDA capability.",
-                category=UserWarning,
-                stacklevel=2,
-            )
-        # keep math kernel for PyTorch versions before 2.2 (Flash Attention v2 is only
-        # available on PyTorch 2.2+, while Flash Attention v1 cannot handle all cases)
-        pytorch_version = tuple(int(v) for v in torch.__version__.split(".")[:2])
-        if pytorch_version < (2, 2):
-            warnings.warn(
-                f"You are using PyTorch {torch.__version__} without Flash Attention v2 support. "
-                "Consider upgrading to PyTorch 2.2+ for Flash Attention v2 (which could be faster).",
-                category=UserWarning,
-                stacklevel=2,
-            )
-        math_kernel_on = pytorch_version < (2, 2) or not use_flash_attn
-    else:
-        old_gpu = True
-        use_flash_attn = False
-        math_kernel_on = True
-
-    return old_gpu, use_flash_attn, math_kernel_on
+    """CPU-only fork: math SDP only."""
+    return True, False, True
 
 
 OLD_GPU, USE_FLASH_ATTN, MATH_KERNEL_ON = get_sdpa_settings()
@@ -390,10 +365,6 @@ def multi_head_attention_forward(
                 q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
             ).transpose(1, 2)
         else:
-            torch.backends.cuda.enable_flash_sdp(True)
-            torch.backends.cuda.enable_math_sdp(True)
-            torch.backends.cuda.enable_mem_efficient_sdp(True)
-
             attn_output = F.scaled_dot_product_attention(
                 q, k, v, attn_mask, dropout_p, is_causal
             )

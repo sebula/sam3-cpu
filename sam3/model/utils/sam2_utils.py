@@ -102,11 +102,11 @@ def load_video_frames(
     img_mean=(0.5, 0.5, 0.5),
     img_std=(0.5, 0.5, 0.5),
     async_loading_frames=False,
-    compute_device=torch.device("cuda"),
+    compute_device=torch.device("cpu"),
 ):
     """
     Load the video frames from video_path. The frames are resized to image_size as in
-    the model and are loaded to GPU if offload_video_to_cpu=False. This is used by the demo.
+    the model. This CPU-only fork keeps tensors on CPU regardless of offload_video_to_cpu.
     """
     is_bytes = isinstance(video_path, bytes)
     is_str = isinstance(video_path, str)
@@ -143,13 +143,12 @@ def load_video_frames_from_jpg_images(
     img_mean=(0.5, 0.5, 0.5),
     img_std=(0.5, 0.5, 0.5),
     async_loading_frames=False,
-    compute_device=torch.device("cuda"),
+    compute_device=torch.device("cpu"),
 ):
     """
     Load the video frames from a directory of JPEG files ("<frame_index>.jpg" format).
 
-    The frames are resized to image_size x image_size and are loaded to GPU if
-    `offload_video_to_cpu` is `False` and to CPU if `offload_video_to_cpu` is `True`.
+    The frames are resized to image_size x image_size. This CPU-only fork keeps tensors on CPU.
 
     You can load a frame asynchronously by setting `async_loading_frames` to `True`.
     """
@@ -209,7 +208,7 @@ def load_video_frames_from_video_file(
     offload_video_to_cpu,
     img_mean=(0.5, 0.5, 0.5),
     img_std=(0.5, 0.5, 0.5),
-    compute_device=torch.device("cuda"),
+    compute_device=torch.device("cpu"),
 ):
     """Load the video frames from a video file."""
     import decord

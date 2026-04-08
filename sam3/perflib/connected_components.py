@@ -1,20 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates. All Rights Reserved
 
 # pyre-unsafe
-import logging
 
 import torch
-
-try:
-    from cc_torch import get_connected_components
-
-    HAS_CC_TORCH = True
-except ImportError:
-    logging.debug(
-        "cc_torch not found. Consider installing for better performance. Command line:"
-        " pip install git+https://github.com/ronghanghu/cc_torch.git"
-    )
-    HAS_CC_TORCH = False
 
 
 def connected_components_cpu_single(values: torch.Tensor):
@@ -71,16 +59,4 @@ def connected_components(input_tensor: torch.Tensor):
         "Input tensor must be (B, H, W) or (B, 1, H, W)."
     )
 
-    if input_tensor.is_cuda:
-        if HAS_CC_TORCH:
-            return get_connected_components(input_tensor.to(torch.uint8))
-        else:
-            # triton fallback
-            from sam3.perflib.triton.connected_components import (
-                connected_components_triton,
-            )
-
-            return connected_components_triton(input_tensor)
-
-    # CPU fallback
     return connected_components_cpu(input_tensor)

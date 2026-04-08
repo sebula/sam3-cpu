@@ -68,6 +68,7 @@ class Sam3VideoInference(Sam3VideoBase):
             img_std=self.image_std,
             async_loading_frames=async_loading_frames,
             video_loader_type=video_loader_type,
+            compute_device=self.device,
         )
         inference_state = {}
         inference_state["image_size"] = self.image_size
@@ -627,7 +628,7 @@ class Sam3VideoInference(Sam3VideoBase):
         ## Compile Tracker model components
         self.tracker.maskmem_backbone.forward = compile_wrapper(
             self.tracker.maskmem_backbone.forward,
-            mode="max-autotune-no-cudagraphs",
+            mode="default",
             fullgraph=True,
             dynamic=False,
         )
@@ -635,7 +636,7 @@ class Sam3VideoInference(Sam3VideoBase):
         self.tracker.transformer.encoder.forward = shape_logging_wrapper(
             compile_wrapper(
                 self.tracker.transformer.encoder.forward,
-                mode="max-autotune-no-cudagraphs",
+                mode="default",
                 fullgraph=True,
                 dynamic=True,
             ),
@@ -798,7 +799,6 @@ class Sam3VideoInference(Sam3VideoBase):
         return inference_state
 
     @torch.inference_mode()
-    @torch.autocast(device_type="cuda", dtype=torch.bfloat16)
     def warm_up_compilation(self):
         """
         Warm up the model by running a dummy inference to compile the model. This is
@@ -807,11 +807,11 @@ class Sam3VideoInference(Sam3VideoBase):
         if not self.compile_model:
             return
         self._warm_up_complete = False
-        if self.device.type != "cuda":
-            raise RuntimeError(
-                f"The model must be on CUDA for warm-up compilation, got {self.device=}."
-            )
+        # CPU-only fork: skip torch.compile warm-up (compile_model should be False).
+        self._warm_up_complete = True
+        return
 
+    def _warm_up_compilation_impl(self):
         # temporally set to single GPU temporarily for warm-up compilation
         orig_rank = self.rank
         orig_world_size = self.world_size
@@ -906,7 +906,6 @@ class Sam3VideoInference(Sam3VideoBase):
         )
         return frame_idx, self._postprocess_output(inference_state, out)
 
-    @torch.autocast(device_type="cuda", dtype=torch.bfloat16)
     def forward(self, input: BatchedDatapoint, is_inference: bool = False):
         """This method is only used for benchmark eval (not used in the demo)."""
         # set the model to single GPU for benchmark evaluation (to be compatible with trainer)

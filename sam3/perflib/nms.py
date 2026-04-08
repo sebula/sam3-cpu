@@ -2,23 +2,9 @@
 
 # pyre-unsafe
 
-import logging
-
 import numpy as np
 import torch
 from sam3.perflib.masks_ops import mask_iou
-
-
-try:
-    from torch_generic_nms import generic_nms as generic_nms_cuda
-
-    GENERIC_NMS_AVAILABLE = True
-except ImportError:
-    logging.debug(
-        "Falling back to triton or CPU mask NMS implementation -- please install `torch_generic_nms` via\n\t"
-        'pip uninstall -y torch_generic_nms; TORCH_CUDA_ARCH_LIST="8.0 9.0" pip install git+https://github.com/ronghanghu/torch_generic_nms'
-    )
-    GENERIC_NMS_AVAILABLE = False
 
 
 def nms_masks(
@@ -60,14 +46,6 @@ def generic_nms(
 
     assert ious.dim() == 2 and ious.size(0) == ious.size(1)
     assert scores.dim() == 1 and scores.size(0) == ious.size(0)
-
-    if ious.is_cuda:
-        if GENERIC_NMS_AVAILABLE:
-            return generic_nms_cuda(ious, scores, iou_threshold, use_iou_matrix=True)
-        else:
-            from sam3.perflib.triton.nms import nms_triton
-
-            return nms_triton(ious, scores, iou_threshold)
 
     return generic_nms_cpu(ious, scores, iou_threshold)
 

@@ -14,6 +14,7 @@ from typing import Dict, Optional
 
 import torch
 from sam3.logger import get_logger
+from sam3.model.device_utils import enter_persistent_bf16_autocast
 from sam3.model.sam3_base_predictor import Sam3BasePredictor
 
 logger = get_logger(__name__)
@@ -44,12 +45,7 @@ class Sam3MultiplexVideoPredictor(Sam3BasePredictor):
         self.default_output_prob_thresh = default_output_prob_thresh
         self.async_loading_frames = async_loading_frames
 
-        # turn on tfloat32 for Ampere GPUs
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        # use bfloat16 inference for Flash Attention kernel
-        self.bf16_context = torch.autocast(device_type="cuda", dtype=torch.bfloat16)
-        self.bf16_context.__enter__()
+        self.bf16_context = enter_persistent_bf16_autocast(torch.device("cpu"))
 
         if warm_up:
             self.model._warm_up_complete = False

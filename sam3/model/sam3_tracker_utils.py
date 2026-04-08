@@ -375,20 +375,14 @@ def fill_holes_in_mask_scores(
     fill_hole_area=None,
     sprinkle_removal_area=None,
 ):
-    # Support onevision-style keyword args
-    if fill_hole_area is not None and max_area is None:
-        max_area = fill_hole_area
     """
     A post processor to fill small holes in mask scores with area under `max_area`.
     Holes are those small connected components in either background or foreground.
-
-    Note that it relies on the "cc_torch" package to find connected components fast. You can
-    install it via the following command (`TORCH_CUDA_ARCH_LIST=8.0` is for A100 GPUs):
-    ```
-    pip uninstall -y cc_torch; TORCH_CUDA_ARCH_LIST=8.0 9.0 pip install git+https://github.com/ronghanghu/cc_torch
-    ```
-    Otherwise, it will fallback to a slightly slower triton implementation, or skimage if the tensor is on cpu
+    Uses connected-components helpers backed by SciPy/skimage on CPU in this fork.
     """
+    # Support onevision-style keyword args
+    if fill_hole_area is not None and max_area is None:
+        max_area = fill_hole_area
 
     if max_area <= 0:
         return mask  # nothing to fill in this case

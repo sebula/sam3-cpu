@@ -106,7 +106,7 @@ class SAM2Transforms(nn.Module):
                 # We fill holes with negative mask score (-10.0) to change them to background.
                 masks = torch.where(is_hole, self.mask_threshold - 10.0, masks)
         except Exception as e:
-            # Skip the post-processing step if the CUDA kernel fails
+            # Skip the post-processing step if the optional kernel fails
             warnings.warn(
                 f"{e}\n\nSkipping the post-processing step due to the error above. You can "
                 "still use SAM 3 and it's OK to ignore the error above, although some post-processing "

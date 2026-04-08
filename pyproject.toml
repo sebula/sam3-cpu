@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sam3"
 dynamic = ["version"]
-description = "SAM3 (Segment Anything Model 3) implementation"
+description = "SAM 3 — CPU inference-only fork (upstream: facebookresearch/sam3)"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {file = "LICENSE"}
@@ -25,14 +25,17 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
+    "einops",
     "timm>=1.0.17",
     "numpy>=1.26,<2",
+    "scipy>=1.10",
     "tqdm",
     "ftfy==6.1.1",
     "regex",
     "iopath>=0.1.10",
     "typing_extensions",
     "huggingface_hub",
+    "pycocotools",
 ]
 
 [project.optional-dependencies]
@@ -47,35 +50,8 @@ dev = [
     "yt-dlp",
     "pandas",
     "opencv-python",
-    "pycocotools",
     "numba",
     "python-rapidjson",
-]
-notebooks = [
-    "matplotlib",
-    "jupyter",
-    "notebook",
-    "ipywidgets",
-    "ipycanvas",
-    "ipympl",
-    "pycocotools",
-    "decord",
-    "opencv-python",
-    "einops",
-    "scikit-image",
-    "scikit-learn",
-]
-train = [
-    "hydra-core",
-    "submitit",
-    "tensorboard",
-    "zstandard",
-    "scipy",
-    "torchmetrics",
-    "fvcore",
-    "fairscale",
-    "scikit-image",
-    "scikit-learn",
 ]
 
 [project.urls]

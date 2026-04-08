@@ -11,7 +11,7 @@ from sam3.model.sam3_tracker_utils import get_1d_sine_pe, select_closest_cond_fr
 from sam3.sam.mask_decoder import MaskDecoder, MLP
 from sam3.sam.prompt_encoder import PromptEncoder
 from sam3.sam.transformer import TwoWayTransformer
-from sam3.train.data.collator import BatchedDatapoint
+from sam3.model.data_misc import BatchedDatapoint
 
 try:
     from timm.layers import trunc_normal_
@@ -435,8 +435,8 @@ class Sam3TrackerBase(torch.nn.Module):
 
     def forward(self, input: BatchedDatapoint, is_inference=False):
         raise NotImplementedError(
-            "Please use the corresponding methods in SAM3VideoPredictor for inference."
-            "See examples/sam3_dense_video_tracking.ipynb for an inference example."
+            "Use SAM3VideoPredictor (or multiplex predictor) API methods for inference; "
+            "this forward path is not used in the CPU integration build."
         )
 
     def forward_image(self, img_batch):
@@ -651,16 +651,15 @@ class Sam3TrackerBase(torch.nn.Module):
             for t_pos, prev, is_selected_cond_frame in t_pos_and_prevs:
                 if prev is None:
                     continue  # skip padding frames
-                # "maskmem_features" might have been offloaded to CPU in demo use cases,
-                # so we load it back to GPU (it's a no-op if it's already on GPU).
-                feats = prev["maskmem_features"].cuda(non_blocking=True)
+                # Features may be on CPU; move to the active compute device for fusion.
+                feats = prev["maskmem_features"].to(device, non_blocking=False)
                 seq_len = feats.shape[-2] * feats.shape[-1]
                 to_cat_prompt.append(feats.flatten(2).permute(2, 0, 1))
                 to_cat_prompt_mask.append(
                     torch.zeros(B, seq_len, device=device, dtype=bool)
                 )
                 # Spatial positional encoding (it might have been offloaded to CPU in eval)
-                maskmem_enc = prev["maskmem_pos_enc"][-1].cuda()
+                maskmem_enc = prev["maskmem_pos_enc"][-1].to(device)
                 maskmem_enc = maskmem_enc.flatten(2).permute(2, 0, 1)
 
                 if (

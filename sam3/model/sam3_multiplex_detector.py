@@ -623,9 +623,8 @@ class Sam3MultiplexDetector(Sam3MultiplexImageBase):
             return [x], None
 
         async_op = self.async_all_gather
-        # here `.contiguous()` is required -- otherwise NCCL all_gather
-        # sometimes gives wrong results (based on Ronghang's observations)
-        x = x.contiguous()  # ensure contiguous memory for NCCL
+        # `.contiguous()` is required for some distributed all_gather implementations.
+        x = x.contiguous()
         output_list = [torch.empty_like(x) for _ in range(self.world_size)]
         handle = torch.distributed.all_gather(output_list, x, async_op=async_op)
         return output_list, handle

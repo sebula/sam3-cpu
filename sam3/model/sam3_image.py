@@ -12,11 +12,9 @@ from sam3.model.model_misc import SAM3Output
 from sam3.model.sam1_task_predictor import SAM3InteractiveImagePredictor
 from sam3.model.vl_combiner import SAM3VLBackbone
 from sam3.perflib.nms import nms_masks
-from sam3.train.data.collator import BatchedDatapoint
-
 from .act_ckpt_utils import activation_ckpt_wrapper
 from .box_ops import box_cxcywh_to_xyxy
-from .data_misc import FindStage
+from .data_misc import BatchedDatapoint, FindStage
 from .geometry_encoders import Prompt
 from .model_misc import inverse_sigmoid
 
@@ -900,9 +898,8 @@ class Sam3ImageOnVideoMultiGPU(Sam3Image):
             return [x], None
 
         async_op = self.async_all_gather
-        # here `.contiguous()` is required -- otherwise NCCL all_gather
-        # sometimes gives wrong results
-        x = x.contiguous()  # ensure contiguous memory for NCCL
+        # `.contiguous()` is required for some distributed all_gather implementations.
+        x = x.contiguous()
         output_list = [torch.empty_like(x) for _ in range(self.world_size)]
         handle = torch.distributed.all_gather(output_list, x, async_op=async_op)
         return output_list, handle

@@ -121,7 +121,7 @@ class SAM3VLBackbone(nn.Module):
         return output
 
     def forward_text(
-        self, captions, input_boxes=None, additional_text=None, device="cuda"
+        self, captions, input_boxes=None, additional_text=None, device="cpu"
     ):
         return activation_ckpt_wrapper(self._forward_text_no_ack_ckpt)(
             captions=captions,
@@ -136,7 +136,7 @@ class SAM3VLBackbone(nn.Module):
         captions,
         input_boxes=None,
         additional_text=None,
-        device="cuda",
+        device="cpu",
     ):
         output = {}
 
@@ -324,7 +324,7 @@ class VisionOnly(nn.Module):
         captions,
         input_boxes=None,
         additional_text=None,
-        device="cuda",
+        device="cpu",
     ):
         bs = len(captions)
         output = {

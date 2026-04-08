@@ -47,20 +47,8 @@ from sam3.model.tokenizer_ve import SimpleTokenizer
 from sam3.model.video_tracking_multiplex import VideoTrackingDynamicMultiplex
 from sam3.model.vitdet import ViT
 from sam3.model.vl_combiner import SAM3VLBackbone, SAM3VLBackboneTri, TriHeadVisionOnly
+from sam3.model.device_utils import default_build_device_string
 from sam3.sam.transformer import RoPEAttention
-
-
-# Setup TensorFloat-32 for Ampere GPUs if available
-def _setup_tf32() -> None:
-    """Enable TensorFloat-32 for Ampere GPUs if available."""
-    if torch.cuda.is_available():
-        device_props = torch.cuda.get_device_properties(0)
-        if device_props.major >= 8:
-            torch.backends.cuda.matmul.allow_tf32 = True
-            torch.backends.cudnn.allow_tf32 = True
-
-
-_setup_tf32()
 
 
 def _create_position_encoding(precompute_resolution=None):
@@ -324,7 +312,7 @@ def _create_sam3_model(
 
     matcher = None
     if not eval_mode:
-        from sam3.train.matcher import BinaryHungarianMatcherV2
+        from sam3.model.binary_hungarian_matcher import BinaryHungarianMatcherV2
 
         matcher = BinaryHungarianMatcherV2(
             focal=True,
@@ -562,9 +550,8 @@ def _load_checkpoint(model, checkpoint_path):
 
 
 def _setup_device_and_mode(model, device, eval_mode):
-    """Setup model device and evaluation mode."""
-    if device == "cuda":
-        model = model.cuda()
+    """CPU-only fork: ``device`` kept for API compatibility; model is always moved to CPU."""
+    model = model.to(torch.device("cpu"))
     if eval_mode:
         model.eval()
     return model
@@ -572,10 +559,11 @@ def _setup_device_and_mode(model, device, eval_mode):
 
 def build_sam3_image_model(
     bpe_path=None,
-    device="cuda" if torch.cuda.is_available() else "cpu",
+    device=None,
     eval_mode=True,
     checkpoint_path=None,
     load_from_HF=True,
+    hf_checkpoint_version="sam3.1",
     enable_segmentation=True,
     enable_inst_interactivity=False,
     compile=False,
@@ -585,9 +573,13 @@ def build_sam3_image_model(
 
     Args:
         bpe_path: Path to the BPE tokenizer vocabulary
-        device: Device to load the model on ('cuda' or 'cpu')
+        device: ignored in this CPU fork (signature preserved for upstream parity)
         eval_mode: Whether to set the model to evaluation mode
         checkpoint_path: Optional path to model checkpoint
+        load_from_HF: If True and ``checkpoint_path`` is None, download from Hugging Face
+        hf_checkpoint_version: Hub checkpoint family; default ``"sam3.1"``. Use ``"sam3"``
+            for the original SAM 3 checkpoint when ``load_from_HF`` is True and
+            ``checkpoint_path`` is None
         enable_segmentation: Whether to enable segmentation head
         enable_inst_interactivity: Whether to enable instance interactivity (SAM 1 task)
         compile_mode: To enable compilation, set to "default"
@@ -595,6 +587,8 @@ def build_sam3_image_model(
     Returns:
         A SAM3 image model
     """
+    if device is None:
+        device = default_build_device_string()
     if bpe_path is None:
         bpe_path = pkg_resources.resource_filename(
             "sam3", "assets/bpe_simple_vocab_16e6.txt.gz"
@@ -643,7 +637,7 @@ def build_sam3_image_model(
         eval_mode,
     )
     if load_from_HF and checkpoint_path is None:
-        checkpoint_path = download_ckpt_from_hf(version="sam3")
+        checkpoint_path = download_ckpt_from_hf(version=hf_checkpoint_version)
     # Load checkpoint if provided
     if checkpoint_path is not None:
         _load_checkpoint(model, checkpoint_path)
@@ -654,11 +648,11 @@ def build_sam3_image_model(
     return model
 
 
-def download_ckpt_from_hf(version="sam3"):
+def download_ckpt_from_hf(version="sam3.1"):
     """Download model checkpoint from HuggingFace Hub.
 
     Args:
-        version: "sam3" or "sam3.1"
+        version: ``"sam3.1"`` (default) or ``"sam3"``
     """
     if version == "sam3.1":
         repo_id = "facebook/sam3.1"
@@ -681,7 +675,7 @@ def build_sam3_video_model(
     geo_encoder_use_img_cross_attn: bool = True,
     strict_state_dict_loading: bool = True,
     apply_temporal_disambiguation: bool = True,
-    device="cuda" if torch.cuda.is_available() else "cpu",
+    device=None,
     compile=False,
 ) -> Sam3VideoInferenceWithInstanceInteractivity:
     """
@@ -694,6 +688,8 @@ def build_sam3_video_model(
     Returns:
         Sam3VideoInferenceWithInstanceInteractivity: The instantiated dense tracking model
     """
+    if device is None:
+        device = default_build_device_string()
     if bpe_path is None:
         bpe_path = pkg_resources.resource_filename(
             "sam3", "assets/bpe_simple_vocab_16e6.txt.gz"
@@ -810,7 +806,7 @@ def build_sam3_video_model(
         if unexpected_keys:
             print(f"Unexpected keys: {unexpected_keys}")
 
-    model.to(device=device)
+    model.to(device="cpu")
     return model
 
 
@@ -941,7 +937,7 @@ def build_sam3_multiplex_video_model(
     use_fa3: bool = False,
     use_rope_real: bool = False,
     strict_state_dict_loading: bool = True,
-    device="cuda" if torch.cuda.is_available() else "cpu",
+    device=None,
     compile=False,
 ):
     """
@@ -959,6 +955,8 @@ def build_sam3_multiplex_video_model(
     Returns:
         VideoTrackingDynamicMultiplex: The instantiated multiplex tracking model
     """
+    if device is None:
+        device = default_build_device_string()
     # Build multiplex-specific components
     maskmem_backbone = _create_multiplex_maskmem_backbone(
         multiplex_count=multiplex_count
@@ -1063,7 +1061,7 @@ def build_sam3_multiplex_video_model(
         if unexpected_keys:
             print(f"Unexpected keys: {unexpected_keys}")
 
-    model.to(device=device)
+    model.to(device="cpu")
     return model
 
 
@@ -1079,6 +1077,7 @@ def build_sam3_multiplex_video_predictor(
     session_expiration_sec: int = 1200,
     default_output_prob_thresh: float = 0.5,
     async_loading_frames: bool = True,
+    device=None,
 ):
     """
     Build a fully-initialized Sam3MultiplexVideoPredictor.
@@ -1104,6 +1103,11 @@ def build_sam3_multiplex_video_predictor(
     Returns:
         Sam3MultiplexVideoPredictor: The fully-initialized predictor
     """
+    if device is None:
+        device = default_build_device_string()
+    use_fa3 = False
+    compile = False
+    warm_up = False
     if bpe_path is None:
         bpe_path = pkg_resources.resource_filename(
             "sam3", "assets/bpe_simple_vocab_16e6.txt.gz"
@@ -1125,6 +1129,7 @@ def build_sam3_multiplex_video_predictor(
         use_rope_real=use_rope_real,
         compile=False,
         strict_state_dict_loading=False,
+        device="cpu",
     )
     del tracker_model.backbone
     tracker_model.backbone = None
@@ -1227,7 +1232,7 @@ def build_sam3_multiplex_video_predictor(
                 f"Unexpected keys ({len(unexpected_keys)}): {unexpected_keys[:10]}..."
             )
 
-    demo_model.cuda().eval()
+    demo_model.to("cpu").eval()
 
     # Wrap in predictor
     predictor = Sam3MultiplexVideoPredictor(
@@ -1253,6 +1258,7 @@ def build_sam3_predictor(
     use_fa3: bool = True,
     use_rope_real: bool = True,
     async_loading_frames: bool = True,
+    device=None,
     **kwargs,
 ):
     """
@@ -1269,6 +1275,7 @@ def build_sam3_predictor(
         use_fa3: Use Flash Attention 3
         use_rope_real: Use real-valued RoPE
         async_loading_frames: Load video frames asynchronously
+        device: ignored in this CPU fork (signature preserved for upstream parity)
         **kwargs: Additional arguments passed to the underlying builder
 
     Returns:
@@ -1304,6 +1311,7 @@ def build_sam3_predictor(
             compile=compile,
             warm_up=warm_up,
             async_loading_frames=async_loading_frames,
+            device=device,
             **kwargs,
         )
     elif version == "sam3":
@@ -1312,6 +1320,7 @@ def build_sam3_predictor(
             bpe_path=bpe_path,
             compile=compile,
             async_loading_frames=async_loading_frames,
+            device=device,
             **kwargs,
         )
     else:
