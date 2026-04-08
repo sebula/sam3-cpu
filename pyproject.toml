@@ -3,7 +3,7 @@ requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sam3"
+name = "sam3-cpu"
 dynamic = ["version"]
 description = "SAM 3 — CPU inference-only fork (upstream: facebookresearch/sam3)"
 readme = "README.md"
